@@ -1,0 +1,7 @@
+pandas
+spacy
+neo4j
+sentence-transformers
+scikit-learn
+numpy
+networkx

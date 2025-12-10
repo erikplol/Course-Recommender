@@ -1,0 +1,21 @@
+{
+  "name": "course-recommendation-system",
+  "version": "1.0.0",
+  "description": "Knowledge-based course recommendation system with Neo4j",
+  "main": "recommend_courses.js",
+  "scripts": {
+    "start": "node recommend_courses.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "neo4j",
+    "recommendation",
+    "knowledge-graph",
+    "education"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "neo4j-driver": "^5.14.0"
+  }
+}
