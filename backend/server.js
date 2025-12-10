@@ -206,7 +206,7 @@ app.get('/api/recommendations/personalized', async (req, res) => {
         description: 'Beginner courses only'
       },
       '3': { // Intermediate
-        allowedDifficulties: ['Intermediate', 'Beginner'],
+        allowedDifficulties: ['Intermediate', 'Others'],
         minEnrollment: 5000,
         maxDurationMonths: 4,
         description: 'Intermediate level with solid foundations'
@@ -218,10 +218,10 @@ app.get('/api/recommendations/personalized', async (req, res) => {
         description: 'Intermediate to Advanced challenges'
       },
       '5': { // Advanced/Expert - Most relaxed for variety
-        allowedDifficulties: ['Intermediate', 'Beginner', 'Others'],
+        allowedDifficulties: ['Intermediate', 'Others'],
         minEnrollment: 500,
         maxDurationMonths: null,
-        description: 'All levels, including advanced specializations'
+        description: 'Advanced level - Intermediate and specialized courses'
       }
     };
 
