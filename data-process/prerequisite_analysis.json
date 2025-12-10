@@ -1,0 +1,251 @@
+{
+  "total_skills_analyzed": 9230,
+  "prerequisites_created": 472,
+  "methods_used": [
+    "difficulty_progression",
+    "co_occurrence",
+    "semantic_similarity"
+  ],
+  "top_skills_with_prerequisites": [
+    {
+      "skill": "'data analysis'",
+      "prerequisites": [
+        "data",
+        "introduction",
+        "analysis",
+        "fundamentals",
+        "foundations"
+      ],
+      "course_count": 50,
+      "avg_difficulty": 1.22
+    },
+    {
+      "skill": "'data visualization (dataviz)'",
+      "prerequisites": [
+        "data",
+        "fundamentals",
+        "foundations",
+        "research",
+        "work"
+      ],
+      "course_count": 33,
+      "avg_difficulty": 1.45
+    },
+    {
+      "skill": "['data science'",
+      "prerequisites": [
+        "data",
+        "introduction",
+        "fundamentals",
+        "science",
+        "foundations"
+      ],
+      "course_count": 31,
+      "avg_difficulty": 1.26
+    },
+    {
+      "skill": "model",
+      "prerequisites": [
+        "data",
+        "business",
+        "analysis",
+        "design",
+        "development"
+      ],
+      "course_count": 27,
+      "avg_difficulty": 1.78
+    },
+    {
+      "skill": "data science",
+      "prerequisites": [
+        "data",
+        "introduction",
+        "fundamentals",
+        "science",
+        "foundations"
+      ],
+      "course_count": 24,
+      "avg_difficulty": 1.42
+    },
+    {
+      "skill": "processing",
+      "prerequisites": [
+        "data",
+        "introduction",
+        "analysis",
+        "google",
+        "fundamentals"
+      ],
+      "course_count": 19,
+      "avg_difficulty": 1.74
+    },
+    {
+      "skill": "data structures",
+      "prerequisites": [
+        "data",
+        "introduction",
+        "fundamentals",
+        "basics",
+        "structures"
+      ],
+      "course_count": 16,
+      "avg_difficulty": 1.44
+    },
+    {
+      "skill": "learning",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "that",
+        "fundamentals",
+        "programming"
+      ],
+      "course_count": 79,
+      "avg_difficulty": 1.58
+    },
+    {
+      "skill": "models",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "that",
+        "fundamentals",
+        "project"
+      ],
+      "course_count": 73,
+      "avg_difficulty": 1.6
+    },
+    {
+      "skill": "machine",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "that",
+        "fundamentals",
+        "programming"
+      ],
+      "course_count": 70,
+      "avg_difficulty": 1.59
+    },
+    {
+      "skill": "engineering",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "business",
+        "design",
+        "that"
+      ],
+      "course_count": 49,
+      "avg_difficulty": 1.65
+    },
+    {
+      "skill": "'machine learning'",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "business",
+        "learning",
+        "design"
+      ],
+      "course_count": 41,
+      "avg_difficulty": 1.66
+    },
+    {
+      "skill": "algorithms",
+      "prerequisites": [
+        "management",
+        "business",
+        "that",
+        "fundamentals",
+        "programming"
+      ],
+      "course_count": 25,
+      "avg_difficulty": 1.64
+    },
+    {
+      "skill": "networks",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "that",
+        "fundamentals",
+        "project"
+      ],
+      "course_count": 25,
+      "avg_difficulty": 1.6
+    },
+    {
+      "skill": "lifecycle",
+      "prerequisites": [
+        "management",
+        "introduction",
+        "that",
+        "fundamentals",
+        "project"
+      ],
+      "course_count": 19,
+      "avg_difficulty": 1.63
+    },
+    {
+      "skill": "insights",
+      "prerequisites": [
+        "management",
+        "that",
+        "fundamentals",
+        "project",
+        "'data analysis'"
+      ],
+      "course_count": 17,
+      "avg_difficulty": 1.59
+    },
+    {
+      "skill": "regression",
+      "prerequisites": [
+        "skills",
+        "analysis",
+        "python",
+        "programming",
+        "'data analysis'"
+      ],
+      "course_count": 17,
+      "avg_difficulty": 1.71
+    },
+    {
+      "skill": "data",
+      "prerequisites": [
+        "introduction",
+        "fundamentals",
+        "foundations",
+        "basics",
+        "work"
+      ],
+      "course_count": 220,
+      "avg_difficulty": 1.42
+    },
+    {
+      "skill": "management",
+      "prerequisites": [
+        "introduction",
+        "fundamentals",
+        "foundations",
+        "basics",
+        "the basics"
+      ],
+      "course_count": 111,
+      "avg_difficulty": 1.27
+    },
+    {
+      "skill": "skills",
+      "prerequisites": [
+        "introduction",
+        "fundamentals",
+        "foundations",
+        "basics",
+        "life"
+      ],
+      "course_count": 99,
+      "avg_difficulty": 1.38
+    }
+  ]
+}

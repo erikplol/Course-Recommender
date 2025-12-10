@@ -27,11 +27,19 @@ const driver = neo4j.driver(
 app.get("/api/courses", async (req, res) => {
   const { page = 1, limit = 20, difficulty, organization, search } = req.query;
   const skip = (parseInt(page) - 1) * parseInt(limit);
-
   const session = driver.session();
+
   try {
     let query = "MATCH (c:Course)";
     let params = { skip: neo4j.int(skip), limit: neo4j.int(limit) };
+    let whereConditions = [];
+
+    // Base relationships
+    query += `
+      OPTIONAL MATCH (c)-[:HAS_DIFFICULTY]->(d:Difficulty)
+      OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
+      OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
+    `;
 
     // Filter by difficulty
     if (difficulty) {
@@ -45,26 +53,64 @@ app.get("/api/courses", async (req, res) => {
       params.organization = organization;
     }
 
+    // Filter by minimum rating
+    if (minRating) {
+      whereConditions.push('c.rating >= $minRating');
+      params.minRating = parseFloat(minRating);
+    }
+
+    // Filter by minimum students
+    if (minStudents) {
+      whereConditions.push('c.students >= $minStudents');
+      params.minStudents = neo4j.int(parseInt(minStudents));
+    }
+
+    // Collect skills before WHERE clause
     query += `
-      OPTIONAL MATCH (c)-[:HAS_DIFFICULTY]->(d:Difficulty)
-      OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-      OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
       WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
     `;
 
+    // Filter by duration range
+    if (duration && duration !== 'all') {
+      const durationFilters = {
+        'short': 'c.time =~ ".*[0-9]+ Hour.*" OR c.time =~ ".*1 Month.*"',
+        'medium': 'c.time =~ ".*[2-4] Month.*"',
+        'long': 'c.time =~ ".*[5-9] Month.*" OR c.time =~ ".*1[0-9]+ Month.*"'
+      };
+      if (durationFilters[duration]) {
+        whereConditions.push(`(${durationFilters[duration]})`);
+      }
+    }
+
     // Search by title, summary, or skills
     if (search) {
-      query += `
-        WHERE toLower(c.title) CONTAINS toLower($search)
+      whereConditions.push(`(
+        toLower(c.title) CONTAINS toLower($search)
         OR toLower(c.summary) CONTAINS toLower($search)
         OR any(skill IN skills WHERE skill CONTAINS toLower($search))
-      `;
+      )`);
       params.search = search;
     }
 
+    // Add WHERE clause if there are conditions
+    if (whereConditions.length > 0) {
+      query += ' WHERE ' + whereConditions.join(' AND ');
+    }
+
+    // Determine sort order
+    const validSortFields = {
+      'rating': 'c.rating',
+      'students': 'c.students',
+      'title': 'c.title',
+      'duration': 'c.time'
+    };
+    
+    const sortField = validSortFields[sortBy] || validSortFields.rating;
+    const order = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
     query += `
       RETURN c, d.level as difficulty, o.name as organization, skills
-      ORDER BY c.rating DESC
+      ORDER BY ${sortField} ${order}
       SKIP $skip LIMIT $limit
     `;
 
@@ -79,7 +125,7 @@ app.get("/api/courses", async (req, res) => {
           ? neo4j.int(course.review_num).toNumber()
           : 0,
         duration: course.time,
-        students: course.students ? neo4j.int(course.students).toNumber() : 0,
+        students: toNumber(course.students),
         url: course.url,
         summary: course.summary,
         difficulty: record.get("difficulty"),
@@ -88,7 +134,20 @@ app.get("/api/courses", async (req, res) => {
       };
     });
 
-    res.json({ courses, page: parseInt(page), limit: parseInt(limit) });
+    res.json({ 
+      courses, 
+      page: parseInt(page), 
+      limit: parseInt(limit),
+      filters: {
+        difficulty,
+        organization,
+        minRating,
+        minStudents,
+        duration,
+        sortBy,
+        sortOrder
+      }
+    });
   } catch (error) {
     console.error("Courses fetch error:", error);
     res.status(500).json({ error: "Failed to fetch courses" });
@@ -159,7 +218,16 @@ app.get("/api/courses/:title", async (req, res) => {
 // RECOMMENDATION ROUTES
 // ============================================================
 
-// Helper function to parse course duration in months
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+/**
+ * Parse course duration string and convert to months
+ * Handles formats: "1 - 3 Months", "3 Months", "40 Hours"
+ * @param {string} timeString - Duration string from course
+ * @returns {number|null} Duration in months, or null if unparseable
+ */
 function parseCourseDuration(timeString) {
   if (!timeString) return null;
 
@@ -175,10 +243,34 @@ function parseCourseDuration(timeString) {
   } else if (unit.startsWith("hour")) {
     // Convert hours to months (assume 40 hours = 1 month)
     const hours = match[2] ? parseInt(match[2]) : parseInt(match[1]);
-    return Math.ceil(hours / 40);
+    return Math.ceil(hours / HOURS_PER_MONTH);
   }
 
   return null;
+}
+
+/**
+ * Parse and normalize skill/goal input from user
+ * @param {string|array} input - Comma-separated string or array
+ * @returns {array} Array of normalized lowercase strings
+ */
+function parseSkillsInput(input) {
+  if (!input) return [];
+  
+  if (Array.isArray(input)) {
+    return input.map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  
+  return input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * Convert Neo4j integer to JavaScript number safely
+ * @param {object} neo4jInt - Neo4j integer object
+ * @returns {number} JavaScript number
+ */
+function toNumber(neo4jInt) {
+  return neo4jInt ? neo4j.int(neo4jInt).toNumber() : 0;
 }
 
 // Get personalized recommendations based on user level and interests
@@ -606,25 +698,21 @@ app.get("/api/recommendations/next/:courseTitle", async (req, res) => {
 
     const query = `
       MATCH (c:Course)-[:HAS_DIFFICULTY]->(d:Difficulty)
-      WHERE d.level IN $allowedDifficulties
-      AND c.students >= $minEnrollment
-      AND c.rating >= $minRating
       OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
+      OPTIONAL MATCH (prereqSkill:Skill)-[:PREREQUISITE_FOR]->(s)
       OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-      WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
+      OPTIONAL MATCH (prereqCourse:Course)-[:RECOMMENDS_AFTER]->(c)
+      WITH c, d, o, 
+           collect(DISTINCT toLower(s.name)) as skills,
+           collect(DISTINCT toLower(prereqSkill.name)) as prerequisites,
+           collect(DISTINCT prereqCourse.title) as prerequisiteCourses
       WHERE toLower(c.title) CONTAINS $searchTerm
       OR toLower(c.summary) CONTAINS $searchTerm
       OR any(skill IN skills WHERE skill CONTAINS $searchTerm)
-      RETURN c, d.level as difficulty, o.name as organization, skills
-      ORDER BY 
-        CASE d.level
-          WHEN 'Beginner' THEN 0
-          WHEN 'Intermediate' THEN 1
-          ELSE 2
-        END,
-        c.rating DESC,
-        c.students DESC
-      LIMIT 30
+      RETURN c, d.level as difficulty, o.name as organization, 
+             skills, prerequisites, prerequisiteCourses
+      ORDER BY c.rating DESC, c.students DESC
+      LIMIT 50
     `;
 
     const result = await session.run(query, {
@@ -818,6 +906,10 @@ app.get("/api/recommendations/next/:courseTitle", async (req, res) => {
     await session.close();
   }
 });
+
+// ============================================================
+// END OF LEARNING PATH BUILDER
+// ============================================================
 
 // ============================================================
 // USER PROGRESS ROUTES
