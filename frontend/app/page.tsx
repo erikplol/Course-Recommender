@@ -10,23 +10,23 @@ export default function Home() {
       <section className="text-center mb-20">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
           <Zap className="h-4 w-4" />
-          <span>Knowledge Based Learning Recommendations</span>
+          <span>Knowledge-Based Learning Recommendations</span>
         </div>
         
         <h1 className="text-5xl md:text-6xl font-bold tracking-tight mb-6 bg-gradient-to-r from-slate-900 to-slate-700 dark:from-slate-100 dark:to-slate-300 bg-clip-text text-transparent">
-          Your Learning Journey Starts Here
+          Your Personalized Learning Journey
         </h1>
         
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-10">
-          Discover courses tailored to your skills and goals using knowledge-based reasoning 
-          and graph intelligence. Build the compatible learning path.
+          Discover courses tailored to your skills and goals. Navigate from beginner to expert with intelligent, 
+          graph-based course recommendations and personalized learning paths.
         </p>
         
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <Button size="lg" asChild className="text-lg px-8">
             <Link href="/learning-path">
               <Lightbulb className="mr-2 h-5 w-5" />
-              Get Recommendation
+              Get Started
             </Link>
           </Button>
           

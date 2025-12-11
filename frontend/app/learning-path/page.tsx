@@ -71,7 +71,7 @@ export default function LearningPathPage() {
             Build Your Learning Path
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Tell us what you want to learn and we'll create a personalized course path just for you
+            Tell us what you want to learn and we'll create a personalized course path tailored to your goals
           </p>
         </div>
 
@@ -83,7 +83,7 @@ export default function LearningPathPage() {
               Your Learning Goals
             </CardTitle>
             <CardDescription>
-              Share your learning objectives and we'll recommend the perfect courses
+              Share your learning objectives and we'll recommend the perfect course sequence
             </CardDescription>
           </CardHeader>
           <CardContent>

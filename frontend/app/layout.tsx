@@ -7,7 +7,7 @@ import { Navigation } from "@/components/navigation";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "CourseRec - Knowledge Based Learning Recommendations",
+  title: "Coursenauts",
   description: "Discover personalized course recommendations and learning paths powered by knowledge-based reasoning",
 };
 
