@@ -1,7 +1,7 @@
-const express = require("express");
-const cors = require("cors");
-const neo4j = require("neo4j-driver");
-require("dotenv").config();
+const express = require('express');
+const cors = require('cors');
+const neo4j = require('neo4j-driver');
+require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -12,25 +12,104 @@ app.use(express.json());
 
 // Neo4j Driver
 const driver = neo4j.driver(
-  process.env.NEO4J_URI || "neo4j+s://f7d62c0a.databases.neo4j.io",
+  process.env.NEO4J_URI || 'neo4j+s://f7d62c0a.databases.neo4j.io',
   neo4j.auth.basic(
-    process.env.NEO4J_USER || "neo4j",
-    process.env.NEO4J_PASSWORD || "VBRuirRqvWKo94uoeq8vJEveOivYZFpoFsh2KNH-VaY"
+    process.env.NEO4J_USER || 'neo4j',
+    process.env.NEO4J_PASSWORD || 'VBRuirRqvWKo94uoeq8vJEveOivYZFpoFsh2KNH-VaY'
   )
 );
+
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
+
+/**
+ * Parse course duration string and convert to months
+ * Handles formats: "1 - 3 Months", "3 Months", "40 Hours"
+ * @param {string} timeString - Duration string from course
+ * @returns {number|null} Duration in months, or null if unparseable
+ */
+function parseCourseDuration(timeString) {
+  if (!timeString || typeof timeString !== 'string') return null;
+  
+  const match = timeString.match(/(\d+)\s*-?\s*(\d+)?\s*(Month|Hour)/i);
+  if (!match) return null;
+  
+  const unit = match[3].toLowerCase();
+  const HOURS_PER_MONTH = 40;
+  
+  if (unit.startsWith('month')) {
+    // Take the maximum value in range for conservative estimation
+    const maxMonths = match[2] ? parseInt(match[2]) : parseInt(match[1]);
+    return maxMonths;
+  } else if (unit.startsWith('hour')) {
+    const hours = match[2] ? parseInt(match[2]) : parseInt(match[1]);
+    return Math.ceil(hours / HOURS_PER_MONTH);
+  }
+  
+  return null;
+}
+
+/**
+ * Parse and normalize skill/goal input from user
+ * @param {string|array} input - Comma-separated string or array
+ * @returns {array} Array of normalized lowercase strings
+ */
+function parseSkillsInput(input) {
+  if (!input) return [];
+  
+  if (Array.isArray(input)) {
+    return input.map(s => s.trim().toLowerCase()).filter(Boolean);
+  }
+  
+  return input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * Convert Neo4j integer to JavaScript number safely
+ * @param {object} neo4jInt - Neo4j integer object
+ * @returns {number} JavaScript number
+ */
+function toNumber(neo4jInt) {
+  return neo4jInt ? neo4j.int(neo4jInt).toNumber() : 0;
+}
 
 // ============================================================
 // COURSE ROUTES
 // ============================================================
 
-// Get all courses with pagination
-app.get("/api/courses", async (req, res) => {
-  const { page = 1, limit = 20, difficulty, organization, search } = req.query;
+/**
+ * Get all courses with advanced filtering, sorting, and pagination
+ * Query params:
+ * - page, limit: Pagination
+ * - search: Search in title, summary, skills
+ * - difficulty: Filter by difficulty level
+ * - organization: Filter by organization
+ * - minRating: Minimum rating (0-5)
+ * - minStudents: Minimum student count
+ * - duration: Filter by duration (short, medium, long)
+ * - sortBy: rating, students, title, duration (default: rating)
+ * - sortOrder: asc, desc (default: desc)
+ */
+app.get('/api/courses', async (req, res) => {
+  const { 
+    page = 1, 
+    limit = 20, 
+    difficulty, 
+    organization, 
+    search,
+    minRating,
+    minStudents,
+    duration,
+    sortBy = 'rating',
+    sortOrder = 'desc'
+  } = req.query;
+  
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const session = driver.session();
 
   try {
-    let query = "MATCH (c:Course)";
+    let query = 'MATCH (c:Course)';
     let params = { skip: neo4j.int(skip), limit: neo4j.int(limit) };
     let whereConditions = [];
 
@@ -42,14 +121,14 @@ app.get("/api/courses", async (req, res) => {
     `;
 
     // Filter by difficulty
-    if (difficulty) {
-      query += "-[:HAS_DIFFICULTY]->(d:Difficulty {level: $difficulty})";
+    if (difficulty && difficulty !== 'all') {
+      whereConditions.push('d.level = $difficulty');
       params.difficulty = difficulty;
     }
 
     // Filter by organization
-    if (organization) {
-      query += "-[:PROVIDED_BY]->(o:Organization {name: $organization})";
+    if (organization && organization !== 'all') {
+      whereConditions.push('o.name = $organization');
       params.organization = organization;
     }
 
@@ -116,21 +195,19 @@ app.get("/api/courses", async (req, res) => {
 
     const result = await session.run(query, params);
 
-    const courses = result.records.map((record) => {
-      const course = record.get("c").properties;
+    const courses = result.records.map(record => {
+      const course = record.get('c').properties;
       return {
         title: course.title,
         rating: course.rating ? parseFloat(course.rating) : 0,
-        reviewCount: course.review_num
-          ? neo4j.int(course.review_num).toNumber()
-          : 0,
+        reviewCount: toNumber(course.review_num),
         duration: course.time,
         students: toNumber(course.students),
         url: course.url,
         summary: course.summary,
-        difficulty: record.get("difficulty"),
-        organization: record.get("organization"),
-        skills: record.get("skills"),
+        difficulty: record.get('difficulty'),
+        organization: record.get('organization'),
+        skills: record.get('skills')
       };
     });
 
@@ -149,15 +226,15 @@ app.get("/api/courses", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Courses fetch error:", error);
-    res.status(500).json({ error: "Failed to fetch courses" });
+    console.error('Courses fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch courses' });
   } finally {
     await session.close();
   }
 });
 
 // Get course details by title
-app.get("/api/courses/:title", async (req, res) => {
+app.get('/api/courses/:title', async (req, res) => {
   const { title } = req.params;
   const session = driver.session();
 
@@ -181,521 +258,301 @@ app.get("/api/courses/:title", async (req, res) => {
     );
 
     if (result.records.length === 0) {
-      return res.status(404).json({ error: "Course not found" });
+      return res.status(404).json({ error: 'Course not found' });
     }
 
     const record = result.records[0];
-    const course = record.get("c").properties;
+    const course = record.get('c').properties;
 
     res.json({
       title: course.title,
       rating: course.rating ? parseFloat(course.rating) : 0,
-      reviewCount: course.review_num
-        ? neo4j.int(course.review_num).toNumber()
-        : 0,
+      reviewCount: toNumber(course.review_num),
       duration: course.time,
-      students: course.students ? neo4j.int(course.students).toNumber() : 0,
+      students: toNumber(course.students),
       url: course.url,
       summary: course.summary,
       description: course.description,
-      difficulty: record.get("difficulty"),
-      organization: record.get("organization"),
-      certificateType: record.get("certificateType"),
-      skills: record.get("skills"),
-      relatedCourses: record.get("relatedCourses").filter((c) => c.title),
-      prerequisites: record.get("prerequisites").filter((c) => c.title),
-      nextCourses: record.get("nextCourses").filter((c) => c.title),
+      difficulty: record.get('difficulty'),
+      organization: record.get('organization'),
+      certificateType: record.get('certificateType'),
+      skills: record.get('skills'),
+      relatedCourses: record.get('relatedCourses').filter(c => c.title),
+      prerequisites: record.get('prerequisites').filter(c => c.title),
+      nextCourses: record.get('nextCourses').filter(c => c.title)
     });
   } catch (error) {
-    console.error("Course detail error:", error);
-    res.status(500).json({ error: "Failed to fetch course details" });
+    console.error('Course detail error:', error);
+    res.status(500).json({ error: 'Failed to fetch course details' });
   } finally {
     await session.close();
   }
 });
 
 // ============================================================
-// RECOMMENDATION ROUTES
-// ============================================================
-
-// ============================================================
-// UTILITY FUNCTIONS
+// KNOWLEDGE-BASED LEARNING PATH BUILDER
 // ============================================================
 
 /**
- * Parse course duration string and convert to months
- * Handles formats: "1 - 3 Months", "3 Months", "40 Hours"
- * @param {string} timeString - Duration string from course
- * @returns {number|null} Duration in months, or null if unparseable
+ * Rule Engine: Applies expert rules to score and rank courses
+ * Implements rule-based reasoning for intelligent recommendations
+ * 
+ * Scoring System:
+ * - Quality (0-100): Based on rating and enrollment
+ * - Time Fit (±50): Duration match with user availability
+ * - Goal Alignment (0-200+): Skills matching learning goals
+ * - Difficulty Progression (0-30): Proper sequence in learning path
  */
-function parseCourseDuration(timeString) {
-  if (!timeString) return null;
-
-  // Format: "1 - 3 Months" or "3 Months" or "1 Month"
-  const match = timeString.match(/(\d+)\s*-?\s*(\d+)?\s*(Month|Hour)/i);
-  if (!match) return null;
-
-  const unit = match[3].toLowerCase();
-  if (unit.startsWith("month")) {
-    // If range like "1 - 3", take the higher number
-    const maxMonths = match[2] ? parseInt(match[2]) : parseInt(match[1]);
-    return maxMonths;
-  } else if (unit.startsWith("hour")) {
-    // Convert hours to months (assume 40 hours = 1 month)
-    const hours = match[2] ? parseInt(match[2]) : parseInt(match[1]);
-    return Math.ceil(hours / HOURS_PER_MONTH);
-  }
-
-  return null;
-}
-
-/**
- * Parse and normalize skill/goal input from user
- * @param {string|array} input - Comma-separated string or array
- * @returns {array} Array of normalized lowercase strings
- */
-function parseSkillsInput(input) {
-  if (!input) return [];
-  
-  if (Array.isArray(input)) {
-    return input.map(s => s.trim().toLowerCase()).filter(Boolean);
-  }
-  
-  return input.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-}
-
-/**
- * Convert Neo4j integer to JavaScript number safely
- * @param {object} neo4jInt - Neo4j integer object
- * @returns {number} JavaScript number
- */
-function toNumber(neo4jInt) {
-  return neo4jInt ? neo4j.int(neo4jInt).toNumber() : 0;
-}
-
-// Get personalized recommendations based on user level and interests
-app.get("/api/recommendations/personalized", async (req, res) => {
-  const { skillLevel, interests } = req.query;
-
-  if (!interests) {
-    return res.status(400).json({ error: "Interests are required" });
-  }
-
-  const session = driver.session();
-
-  try {
-    // Parse interests (comma-separated)
-    const interestList = interests
-      .split(",")
-      .map((i) => i.trim().toLowerCase())
-      .filter((i) => i);
-
-    // Define rules for each user level
-    const levelRules = {
-      1: {
-        // Very Beginner - Most strict for quality
-        allowedDifficulties: ["Beginner"],
-        minEnrollment: 30000,
-        maxDurationMonths: 1,
-        description: "Beginner courses with proven track record",
-      },
-      2: {
-        // Beginner
-        allowedDifficulties: ["Beginner"],
-        minEnrollment: 10000,
-        maxDurationMonths: 2,
-        description: "Beginner courses only",
-      },
-      3: {
-        // Intermediate
-        allowedDifficulties: ["Intermediate", "Others"],
-        minEnrollment: 5000,
-        maxDurationMonths: 4,
-        description: "Intermediate level with solid foundations",
-      },
-      4: {
-        // Upper Intermediate
-        allowedDifficulties: ["Intermediate", "Others"],
-        minEnrollment: 2000,
-        maxDurationMonths: 10,
-        description: "Intermediate to Advanced challenges",
-      },
-      5: {
-        // Advanced/Expert - Most relaxed for variety
-        allowedDifficulties: ["Intermediate", "Others"],
-        minEnrollment: 500,
-        maxDurationMonths: null,
-        description: "Advanced level - Intermediate and specialized courses",
-      },
+class RuleEngine {
+  constructor() {
+    // Quality thresholds
+    this.QUALITY_TIERS = {
+      EXCEPTIONAL: { rating: 4.7, students: 50000, score: 100, label: 'Exceptional' },
+      GREAT: { rating: 4.5, students: 10000, score: 75, label: 'Highly rated' },
+      GOOD: { rating: 4.3, students: 5000, score: 50, label: 'Well-rated' },
+      ACCEPTABLE: { rating: 4.0, students: 0, score: 25, label: 'Good rating' }
     };
-
-    // If no skill level provided, search all levels
-    if (!skillLevel || skillLevel === "") {
-      const query = `
-        MATCH (c:Course)
-        OPTIONAL MATCH (c)-[:HAS_DIFFICULTY]->(d:Difficulty)
-        OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
-        OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-        WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
-        WHERE any(interest IN $interests WHERE 
-          any(skill IN skills WHERE skill CONTAINS interest)
-          OR toLower(c.title) CONTAINS interest
-          OR toLower(c.summary) CONTAINS interest
-        )
-        RETURN c, d.level as difficulty, o.name as organization, skills
-        ORDER BY c.rating DESC, c.students DESC
-        LIMIT 20
-      `;
-
-      const result = await session.run(query, { interests: interestList });
-
-      const recommendations = result.records.map((record) => {
-        const course = record.get("c").properties;
-        const skills = record.get("skills");
-
-        const matchedSkills = interestList.filter((interest) =>
-          skills.some((skill) => skill.includes(interest))
-        );
-
-        const matchedInTitle = interestList.filter((interest) =>
-          course.title.toLowerCase().includes(interest)
-        );
-
-        const allMatches = [...new Set([...matchedSkills, ...matchedInTitle])];
-
-        return {
-          title: course.title,
-          rating: course.rating ? parseFloat(course.rating) : 0,
-          reviewCount: course.review_num
-            ? neo4j.int(course.review_num).toNumber()
-            : 0,
-          duration: course.time,
-          students: course.students ? neo4j.int(course.students).toNumber() : 0,
-          url: course.url,
-          summary: course.summary,
-          difficulty: record.get("difficulty") || "Unknown",
-          organization: record.get("organization"),
-          skills: skills,
-          reason:
-            allMatches.length > 0
-              ? `Teaches: ${allMatches.join(", ")}`
-              : `Matches your interests`,
-        };
-      });
-
-      return res.json({ recommendations: recommendations.slice(0, 10) });
-    }
-
-    // Get rules for the selected level
-    const rules = levelRules[skillLevel];
-    if (!rules) {
-      return res.status(400).json({ error: "Invalid skill level" });
-    }
-
-    // Build query based on user level rules
-    const query = `
-      MATCH (c:Course)-[:HAS_DIFFICULTY]->(d:Difficulty)
-      WHERE d.level IN $allowedDifficulties
-      AND c.students >= $minEnrollment
-      OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
-      OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-      WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
-      WHERE any(interest IN $interests WHERE 
-        any(skill IN skills WHERE skill CONTAINS interest)
-        OR toLower(c.title) CONTAINS interest
-        OR toLower(c.summary) CONTAINS interest
-      )
-      RETURN c, d.level as difficulty, o.name as organization, skills
-      ORDER BY 
-        CASE d.level
-          WHEN $primaryDifficulty THEN 0
-          ELSE 1
-        END,
-        c.rating DESC,
-        c.students DESC
-      LIMIT 20
-    `;
-
-    const result = await session.run(query, {
-      allowedDifficulties: rules.allowedDifficulties,
-      minEnrollment: neo4j.int(rules.minEnrollment),
-      primaryDifficulty: rules.allowedDifficulties[0],
-      interests: interestList,
-    });
-
-    // Filter by duration if maxDurationMonths is set
-    let filteredRecords = result.records;
-    if (rules.maxDurationMonths !== null) {
-      filteredRecords = result.records.filter((record) => {
-        const course = record.get("c").properties;
-        const durationMonths = parseCourseDuration(course.time);
-        return (
-          durationMonths === null || durationMonths <= rules.maxDurationMonths
-        );
-      });
-    }
-
-    // Check if we have at least 1 recommendation
-    if (filteredRecords.length < 1) {
-      // Progressive fallback: Try enrollment reduction first (60% → 40% → 20% → 10%)
-      // then relax duration (150% → 200% → 300% → no limit)
-      const fallbackPercentages = [0.6, 0.4, 0.2, 0.1]; // 60%, 40%, 20%, 10%
-      const durationMultipliers = [1.5, 2, 3, null]; // 150%, 200%, 300%, no limit
-
-      // Try all combinations until we find at least 1 result
-      for (const percentage of fallbackPercentages) {
-        for (const durationMultiplier of durationMultipliers) {
-          const fallbackQuery = `
-            MATCH (c:Course)-[:HAS_DIFFICULTY]->(d:Difficulty)
-            WHERE d.level IN $allowedDifficulties
-            AND c.students >= $fallbackEnrollment
-            OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
-            OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-            WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
-            WHERE any(interest IN $interests WHERE 
-              any(skill IN skills WHERE skill CONTAINS interest)
-              OR toLower(c.title) CONTAINS interest
-              OR toLower(c.summary) CONTAINS interest
-            )
-            RETURN c, d.level as difficulty, o.name as organization, skills
-            ORDER BY 
-              CASE d.level
-                WHEN $primaryDifficulty THEN 0
-                ELSE 1
-              END,
-              c.rating DESC,
-              c.students DESC
-            LIMIT 20
-          `;
-
-          const fallbackResult = await session.run(fallbackQuery, {
-            allowedDifficulties: rules.allowedDifficulties,
-            fallbackEnrollment: neo4j.int(
-              Math.floor(rules.minEnrollment * percentage)
-            ),
-            primaryDifficulty: rules.allowedDifficulties[0],
-            interests: interestList,
-          });
-
-          // Filter by duration with relaxed constraint
-          let fallbackFilteredRecords = fallbackResult.records;
-          if (rules.maxDurationMonths !== null && durationMultiplier !== null) {
-            const relaxedMaxDuration = Math.ceil(
-              rules.maxDurationMonths * durationMultiplier
-            );
-            fallbackFilteredRecords = fallbackResult.records.filter(
-              (record) => {
-                const course = record.get("c").properties;
-                const durationMonths = parseCourseDuration(course.time);
-                return (
-                  durationMonths === null ||
-                  durationMonths <= relaxedMaxDuration
-                );
-              }
-            );
-          }
-
-          // Return as soon as we find at least 1 result
-          if (fallbackFilteredRecords.length >= 1) {
-            const recommendations = fallbackFilteredRecords.map((record) => {
-              const course = record.get("c").properties;
-              const skills = record.get("skills");
-              const difficulty = record.get("difficulty");
-
-              const matchedSkills = interestList.filter((interest) =>
-                skills.some((skill) => skill.includes(interest))
-              );
-
-              const matchedInTitle = interestList.filter((interest) =>
-                course.title.toLowerCase().includes(interest)
-              );
-
-              const allMatches = [
-                ...new Set([...matchedSkills, ...matchedInTitle]),
-              ];
-
-              return {
-                title: course.title,
-                rating: course.rating ? parseFloat(course.rating) : 0,
-                reviewCount: course.review_num
-                  ? neo4j.int(course.review_num).toNumber()
-                  : 0,
-                duration: course.time,
-                students: course.students
-                  ? neo4j.int(course.students).toNumber()
-                  : 0,
-                url: course.url,
-                summary: course.summary,
-                difficulty: difficulty,
-                organization: record.get("organization"),
-                skills: skills,
-                reason:
-                  allMatches.length > 0
-                    ? `${difficulty} level - Teaches: ${allMatches
-                        .slice(0, 3)
-                        .join(", ")}`
-                    : `Recommended ${difficulty} course for your level`,
-              };
-            });
-
-            return res.json({ recommendations: recommendations.slice(0, 10) });
-          }
-        }
-      }
-
-      // If still not found after all fallback attempts, return empty
-      return res.json({ recommendations: [] });
-    }
-
-    // Return up to 10 recommendations if found (minimum 1)
-    const recommendations = filteredRecords.map((record) => {
-      const course = record.get("c").properties;
-      const skills = record.get("skills");
-      const difficulty = record.get("difficulty");
-
-      const matchedSkills = interestList.filter((interest) =>
-        skills.some((skill) => skill.includes(interest))
-      );
-
-      const matchedInTitle = interestList.filter((interest) =>
-        course.title.toLowerCase().includes(interest)
-      );
-
-      const allMatches = [...new Set([...matchedSkills, ...matchedInTitle])];
-
-      // Build reason based on matches and popularity
-      let reason = "";
-      if (allMatches.length > 0) {
-        reason = `${difficulty} - Teaches: ${allMatches
-          .slice(0, 3)
-          .join(", ")}`;
-      } else {
-        reason = `Popular ${difficulty} course`;
-      }
-
-      if (course.students >= 50000) {
-        reason += " • Highly popular";
-      }
-
-      return {
-        title: course.title,
-        rating: course.rating ? parseFloat(course.rating) : 0,
-        reviewCount: course.review_num
-          ? neo4j.int(course.review_num).toNumber()
-          : 0,
-        duration: course.time,
-        students: course.students ? neo4j.int(course.students).toNumber() : 0,
-        url: course.url,
-        summary: course.summary,
-        difficulty: difficulty,
-        organization: record.get("organization"),
-        skills: skills,
-        reason: reason,
-      };
-    });
-
-    res.json({ recommendations: recommendations.slice(0, 10) });
-  } catch (error) {
-    console.error("Personalized recommendations error:", error);
-    res.status(500).json({ error: "Failed to fetch recommendations" });
-  } finally {
-    await session.close();
-  }
-});
-
-// Get learning path from course A to course B
-app.get("/api/recommendations/learning-path", async (req, res) => {
-  const { from, to } = req.query;
-
-  if (!from || !to) {
-    return res
-      .status(400)
-      .json({ error: 'Both "from" and "to" course titles are required' });
+    
+    // Time fitting scores
+    this.TIME_SCORES = {
+      QUICK: 40,        // <= 50% of available time
+      PERFECT: 20,      // <= 100% of available time
+      ACCEPTABLE: -20,  // <= 150% of available time
+      TOO_LONG: -50     // > 150% of available time
+    };
+    
+    // Skill and progression multipliers
+    this.SKILL_MATCH_SCORE = 50;  // Per goal skill taught
+    this.PROGRESSION_SCORES = {
+      BEGINNER_START: 30,
+      INTERMEDIATE_MID: 25,
+      ADVANCED_END: 20
+    };
   }
 
-  const session = driver.session();
-  try {
-    // Find shortest path based on RECOMMENDS_AFTER relationships
-    const result = await session.run(
-      `MATCH path = shortestPath((start:Course {title: $from})-[:RECOMMENDS_AFTER*1..5]->(end:Course {title: $to}))
-       RETURN [node in nodes(path) | node.title] as coursePath,
-              [rel in relationships(path) | rel.reason] as reasons,
-              length(path) as pathLength`,
-      { from: decodeURIComponent(from), to: decodeURIComponent(to) }
+  /**
+   * Rule 1: Quality Ranking - Prioritize high-quality courses
+   * @param {object} course - Course object with rating and students
+   * @returns {number} Quality score (0-100)
+   */
+  applyRankingRule(course) {
+    const { rating = 0, students = 0 } = course;
+    
+    // Check tiers from highest to lowest
+    for (const [tierName, tier] of Object.entries(this.QUALITY_TIERS)) {
+      if (rating >= tier.rating && students >= tier.students) {
+        course.qualityReason = tierName === 'EXCEPTIONAL'
+          ? 'Highly rated with massive enrollment'
+          : tierName === 'GREAT'
+          ? 'Highly rated with strong enrollment'
+          : tierName === 'GOOD'
+          ? 'Well-rated with solid enrollment'
+          : 'Good rating';
+        return tier.score;
+      }
+    }
+    
+    return 0;
+  }
+
+  /**
+   * Rule 2: Prerequisite Chaining - Check course prerequisites
+   * @param {object} course - Course object
+   * @param {array} allCourses - All courses in consideration
+   * @returns {number} Prerequisite score
+   */
+  applyPrerequisiteChainRule(course, allCourses) {
+    // This rule can be expanded to check course prerequisites in the learning path
+    // For now, we rely on difficulty progression and skill gap analysis
+    return 0;
+  }
+
+  /**
+   * Rule 3: Time Fit - Score based on course duration vs available time
+   * @param {object} course - Course object with duration
+   * @param {number} maxDurationMonths - User's available time in months
+   * @returns {number} Time fit score (-50 to 40)
+   */
+  applyTimeFilterRule(course, maxDurationMonths) {
+    if (!maxDurationMonths) return 0;
+    
+    const courseDuration = parseCourseDuration(course.duration);
+    if (!courseDuration) return 0;
+    
+    const ratio = courseDuration / maxDurationMonths;
+    
+    if (ratio <= 0.5) {
+      course.timeReason = `Fits well within your ${maxDurationMonths} month timeframe`;
+      return this.TIME_SCORES.QUICK;
+    } else if (ratio <= 1.0) {
+      course.timeReason = `Matches your ${maxDurationMonths} month availability`;
+      return this.TIME_SCORES.PERFECT;
+    } else if (ratio <= 1.5) {
+      course.timeReason = `Slightly longer than your ${maxDurationMonths} month timeframe`;
+      return this.TIME_SCORES.ACCEPTABLE;
+    } else {
+      course.timeReason = `Longer duration than ideal for your timeframe`;
+      return this.TIME_SCORES.TOO_LONG;
+    }
+  }
+
+  /**
+   * Rule 4: Goal Alignment - Prioritize courses teaching target skills
+   * @param {object} course - Course object with skills array
+   * @param {array} goalSkills - User's learning goal skills
+   * @returns {number} Goal alignment score (0-200+)
+   */
+  applySkillGapRule(course, goalSkills) {
+    if (!goalSkills || goalSkills.length === 0) return 0;
+    
+    const courseSkills = course.skills || [];
+    
+    // Find skills that match user's goals
+    const matchedGoalSkills = courseSkills.filter(skill =>
+      goalSkills.some(goalSkill => {
+        const skillLower = skill.toLowerCase();
+        const goalLower = goalSkill.toLowerCase();
+        return skillLower.includes(goalLower) || goalLower.includes(skillLower);
+      })
     );
 
-    if (result.records.length === 0) {
-      return res.status(404).json({
-        error: "No learning path found between these courses",
-        suggestion:
-          "Try selecting courses with related skills or difficulty progression",
-      });
+    if (matchedGoalSkills.length > 0) {
+      const score = matchedGoalSkills.length * this.SKILL_MATCH_SCORE;
+      const skillsPreview = matchedGoalSkills.slice(0, 3).join(', ');
+      course.goalReason = `Teaches ${matchedGoalSkills.length} skill(s) toward your goal: ${skillsPreview}`;
+      return score;
     }
-
-    const record = result.records[0];
-    const path = {
-      courses: record.get("coursePath"),
-      reasons: record.get("reasons"),
-      length: record.get("pathLength").toNumber(),
-    };
-
-    res.json({ path });
-  } catch (error) {
-    console.error("Learning path error:", error);
-    res.status(500).json({ error: "Failed to find learning path" });
-  } finally {
-    await session.close();
+    
+    return 0;
   }
-});
 
-// Get learning pathway from beginner to intermediate based on topic
-app.get("/api/recommendations/next/:courseTitle", async (req, res) => {
+  /**
+   * Rule 5: Difficulty Progression - Ensure proper learning sequence
+   * @param {object} course - Course object with difficulty level
+   * @param {number} userLevel - User's experience level (1-5)
+   * @param {number} position - Position in learning path (0-based)
+   * @returns {number} Progression score (0-30)
+   */
+  applyDifficultyProgressionRule(course, userLevel, position) {
+    const difficulty = (course.difficulty || '').toLowerCase();
+    
+    // Early path: Prefer beginner courses for less experienced users
+    if (position < 3 && difficulty.includes('beginner') && userLevel <= 2) {
+      course.progressionReason = 'Perfect starting point for beginners';
+      return this.PROGRESSION_SCORES.BEGINNER_START;
+    }
+    
+    // Mid path: Intermediate courses for skill building
+    if (position >= 3 && position < 7 && difficulty.includes('intermediate')) {
+      course.progressionReason = 'Natural progression to intermediate level';
+      return this.PROGRESSION_SCORES.INTERMEDIATE_MID;
+    }
+    
+    // Late path: Advanced courses for mastery
+    if (position >= 7 && (difficulty.includes('advanced') || difficulty.includes('others'))) {
+      course.progressionReason = 'Advanced topic for skill mastery';
+      return this.PROGRESSION_SCORES.ADVANCED_END;
+    }
+    
+    return 0;
+  }
+
+  /**
+   * Score and rank all courses using combined rule scores
+   * @param {array} courses - Array of course objects
+   * @param {array} goalSkills - User's learning goals
+   * @param {number} maxDurationMonths - Available time constraint
+   * @param {number} userLevel - User's experience level
+   * @returns {array} Sorted array of scored courses with explanations
+   */
+  scoreAndRank(courses, goalSkills, maxDurationMonths, userLevel) {
+    const scoredCourses = courses.map((course, index) => {
+      // Apply all scoring rules
+      const scores = {
+        quality: this.applyRankingRule(course),
+        prerequisite: this.applyPrerequisiteChainRule(course, courses),
+        timeFit: this.applyTimeFilterRule(course, maxDurationMonths),
+        goalAlignment: this.applySkillGapRule(course, goalSkills),
+        progression: this.applyDifficultyProgressionRule(course, userLevel, index)
+      };
+      
+      const totalScore = Object.values(scores).reduce((sum, score) => sum + score, 0);
+      
+      // Collect all explanation reasons
+      const explanations = [
+        course.goalReason,
+        course.qualityReason,
+        course.timeReason,
+        course.progressionReason,
+        course.prerequisiteReason
+      ].filter(Boolean);
+      
+      return {
+        ...course,
+        score: totalScore,
+        scoreBreakdown: scores,
+        explanation: explanations.length > 0 
+          ? explanations.join(' • ') 
+          : 'Matches your learning criteria'
+      };
+    });
+    
+    // Sort by score descending
+    return scoredCourses.sort((a, b) => b.score - a.score);
+  }
+}
+
+// ============================================================
+// LEARNING PATH BUILDER ENDPOINT
+// ============================================================
+
+/**
+ * Build intelligent learning pathway using 4-stage process:
+ * 1. Parse user input and learning goals
+ * 2. Query Neo4j graph for relevant courses
+ * 3. Apply rule engine for scoring
+ * 4. Build structured learning path
+ */
+app.get('/api/recommendations/next/:courseTitle', async (req, res) => {
   const { courseTitle } = req.params;
-  const { userLevel = "1" } = req.query; // Default to level 1
-
+  const { 
+    userLevel = '3',      // Default: intermediate (1=beginner, 5=expert)
+    currentSkills = '',   // Comma-separated skills user has
+    learningGoals = '',   // Comma-separated skills/topics
+    availableTime = ''    // Time in months
+  } = req.query;
+  
   const session = driver.session();
 
   try {
-    // Define level rules - Level 1 most relaxed, Level 5 most strict
-    // Level 3-5: NO Beginner courses, only Intermediate+
-    const levelRules = {
-      1: {
-        minEnrollment: 500,
-        maxDurationMonths: null,
-        minRating: 4.0,
-        allowedDifficulties: ["Beginner", "Intermediate", "Others"],
-      }, // Most relaxed
-      2: {
-        minEnrollment: 2000,
-        maxDurationMonths: 10,
-        minRating: 4.3,
-        allowedDifficulties: ["Beginner", "Intermediate", "Others"],
-      },
-      3: {
-        minEnrollment: 5000,
-        maxDurationMonths: 4,
-        minRating: 4.5,
-        allowedDifficulties: ["Intermediate", "Others"], // NO Beginner
-      },
-      4: {
-        minEnrollment: 10000,
-        maxDurationMonths: 2,
-        minRating: 4.6,
-        allowedDifficulties: ["Intermediate", "Others"], // NO Beginner
-      },
-      5: {
-        minEnrollment: 30000,
-        maxDurationMonths: 1,
-        minRating: 4.7,
-        allowedDifficulties: ["Intermediate", "Others"], // NO Beginner
-      }, // Most strict
-    };
+    // ============================================================
+    // STAGE 1: INPUT VALIDATION & PARSING
+    // ============================================================
+    console.log('\n[STAGE 1: User Input Processing]');
+    
+    // Parse and validate inputs
+    const searchTerm = decodeURIComponent(courseTitle).toLowerCase().trim();
+    if (!searchTerm) {
+      return res.status(400).json({ error: 'Course topic is required' });
+    }
+    
+    const userSkills = parseSkillsInput(currentSkills);
+    const goalSkills = parseSkillsInput(learningGoals);
+    const maxDurationMonths = availableTime ? parseInt(availableTime) : null;
+    const parsedUserLevel = Math.max(1, Math.min(5, parseInt(userLevel) || 3));
+    
+    console.log(`Topic: "${searchTerm}"`);
+    console.log(`Current Skills: ${userSkills.length > 0 ? userSkills.join(', ') : 'None specified'}`);
+    console.log(`Learning Goals: ${goalSkills.length > 0 ? goalSkills.join(', ') : 'Auto-derived from topic'}`);
+    console.log(`Available Time: ${maxDurationMonths ? maxDurationMonths + ' months' : 'Flexible'}`);
+    console.log(`User Level: ${parsedUserLevel} (1=beginner, 5=expert)`);
 
-    const rules = levelRules[userLevel] || levelRules["1"];
-
-    // Search for courses matching the topic/keyword
-    const searchTerm = decodeURIComponent(courseTitle).toLowerCase();
-
+    // ============================================================
+    // STAGE 2: GRAPH DATABASE QUERY
+    // ============================================================
+    console.log('\n[STAGE 2: Neo4j Graph Reasoning]');
+    
+    // Query for courses with prerequisite chain information
     const query = `
       MATCH (c:Course)-[:HAS_DIFFICULTY]->(d:Difficulty)
       OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
@@ -716,192 +573,222 @@ app.get("/api/recommendations/next/:courseTitle", async (req, res) => {
     `;
 
     const result = await session.run(query, {
-      searchTerm: searchTerm.toLowerCase(),
-      minEnrollment: neo4j.int(rules.minEnrollment),
-      minRating: rules.minRating,
-      allowedDifficulties: rules.allowedDifficulties,
+      searchTerm: searchTerm
     });
+    
+    console.log(`Found ${result.records.length} potential courses from graph`);
 
-    console.log(
-      `[Learning Path] Initial query results: ${result.records.length}`
-    );
-
-    // Filter by duration if specified
-    let filteredRecords = result.records;
-    if (rules.maxDurationMonths !== null) {
-      filteredRecords = result.records.filter((record) => {
-        const course = record.get("c").properties;
-        const durationMonths = parseCourseDuration(course.time);
-        return (
-          durationMonths === null || durationMonths <= rules.maxDurationMonths
-        );
-      });
-      console.log(
-        `[Learning Path] After duration filter (max ${rules.maxDurationMonths} months): ${filteredRecords.length}`
-      );
-    }
-
-    // If less than 5 courses, try multiple fallback strategies
-    if (filteredRecords.length < 5) {
-      const fallbackPercentages = [0.5, 0.3, 0.1, 0.01]; // Enrollment: 50% → 30% → 10% → 1%
-      const durationMultipliers = [2, 5, null]; // Duration: 2x → 5x → no limit
-      const ratingReductions = [0.2, 0.4, 0.6]; // Rating: -0.2 → -0.4 → -0.6
-
-      for (const percentage of fallbackPercentages) {
-        for (const durationMultiplier of durationMultipliers) {
-          for (const ratingReduction of ratingReductions) {
-            const fallbackQuery = `
-              MATCH (c:Course)-[:HAS_DIFFICULTY]->(d:Difficulty)
-              WHERE d.level IN $allowedDifficulties
-              AND c.students >= $fallbackEnrollment
-              AND c.rating >= $fallbackRating
-              OPTIONAL MATCH (c)-[:OFFERS_SKILL]->(s:Skill)
-              OPTIONAL MATCH (c)-[:PROVIDED_BY]->(o:Organization)
-              WITH c, d, o, collect(DISTINCT toLower(s.name)) as skills
-              WHERE toLower(c.title) CONTAINS $searchTerm
-              OR toLower(c.summary) CONTAINS $searchTerm
-              OR any(skill IN skills WHERE skill CONTAINS $searchTerm)
-              RETURN c, d.level as difficulty, o.name as organization, skills
-              ORDER BY 
-                c.rating DESC,
-                c.students DESC
-              LIMIT 30
-            `;
-
-            const fallbackResult = await session.run(fallbackQuery, {
-              searchTerm: searchTerm.toLowerCase(),
-              fallbackEnrollment: neo4j.int(
-                Math.floor(rules.minEnrollment * percentage)
-              ),
-              fallbackRating: Math.max(3.0, rules.minRating - ratingReduction),
-              allowedDifficulties: rules.allowedDifficulties,
-            });
-
-            // Filter by duration if specified
-            let fallbackFiltered = fallbackResult.records;
-            if (
-              rules.maxDurationMonths !== null &&
-              durationMultiplier !== null
-            ) {
-              const relaxedMaxDuration = Math.ceil(
-                rules.maxDurationMonths * durationMultiplier
-              );
-              fallbackFiltered = fallbackResult.records.filter((record) => {
-                const course = record.get("c").properties;
-                const durationMonths = parseCourseDuration(course.time);
-                return (
-                  durationMonths === null ||
-                  durationMonths <= relaxedMaxDuration
-                );
-              });
-            }
-
-            if (fallbackFiltered.length >= 5) {
-              filteredRecords = fallbackFiltered;
-              break;
-            }
-          }
-
-          if (filteredRecords.length >= 5) {
-            break;
-          }
-        }
-
-        if (filteredRecords.length >= 5) {
-          break;
-        }
-      }
-    }
-
-    // Build pathway: Start with Beginner courses, then Intermediate
-    const beginnerCourses = [];
-    const intermediateCourses = [];
-
-    filteredRecords.forEach((record) => {
-      const course = record.get("c").properties;
-      const difficulty = record.get("difficulty");
-      const skills = record.get("skills");
-
-      const courseData = {
-        title: course.title,
-        rating: course.rating ? parseFloat(course.rating) : 0,
-        reviewCount: course.review_num
-          ? neo4j.int(course.review_num).toNumber()
-          : 0,
-        duration: course.time,
-        students: course.students ? neo4j.int(course.students).toNumber() : 0,
-        url: course.url,
-        summary: course.summary,
-        difficulty: difficulty,
-        organization: record.get("organization"),
-        skills: skills,
-        reason:
-          difficulty === "Beginner"
-            ? "Start here - Foundation course with high enrollment"
-            : "Next step - Build on beginner knowledge",
-      };
-
-      if (difficulty === "Beginner") {
-        beginnerCourses.push(courseData);
-      } else if (difficulty === "Intermediate") {
-        intermediateCourses.push(courseData);
-      }
-    });
-
-    console.log(
-      `[Learning Path] Beginner: ${beginnerCourses.length}, Intermediate: ${intermediateCourses.length}, UserLevel: ${userLevel}`
-    );
-
-    // Build pathway based on what's available
-    // For Level 1-2: Prefer mix of Beginner → Intermediate
-    // For Level 3-5: Only Intermediate (Beginner excluded from query)
-    let pathway = [];
-    const level = parseInt(userLevel);
-
-    if (level <= 2) {
-      // Level 1-2: Mix Beginner and Intermediate
-      pathway = [
-        ...beginnerCourses.slice(0, 4),
-        ...intermediateCourses.slice(0, 6),
-      ];
-    } else {
-      // Level 3-5: Only Intermediate courses (no Beginner)
-      pathway = intermediateCourses.slice(0, 10);
-    }
-
-    // Add step numbers and progression reasons
-    const recommendations = pathway.slice(0, 10).map((course, index) => ({
-      ...course,
-      step: index + 1,
-      reason:
-        course.difficulty === "Beginner"
-          ? index === 0
-            ? "🎯 Start here - Perfect for beginners"
-            : `📚 Step ${index + 1} - Continue building foundations`
-          : `🚀 Step ${index + 1} - ${
-              level >= 3
-                ? "Advanced learning path"
-                : "Ready for intermediate challenges"
-            }`,
-    }));
-
-    // Minimum threshold depends on level:
-    // Level 1-2: Allow 3+ courses (can be all Beginner if no Intermediate)
-    // Level 3-5: Need 5+ courses (only Intermediate)
-    const minCourses = level <= 2 ? 3 : 5;
-
-    if (recommendations.length < minCourses) {
+    if (result.records.length === 0) {
+      console.log('⚠️  No courses found for search term');
       return res.json({
         recommendations: [],
-        message:
-          "Not enough courses found. Try a different topic or lower user level.",
+        metadata: {
+          searchTerm,
+          message: 'No courses found matching your criteria. Try a different topic or broader keywords.',
+          stage: 'neo4j_query',
+          totalCandidates: 0
+        }
       });
     }
 
-    res.json({ recommendations });
+    // ============================================================
+    // STAGE 3: RULE-BASED SCORING
+    // ============================================================
+    console.log('\n[STAGE 3: Rule Engine Processing]');
+    
+    const ruleEngine = new RuleEngine();
+    
+    // Transform Neo4j results into course objects
+    const courseCandidates = result.records.map(record => {
+      try {
+        const course = record.get('c').properties;
+        return {
+          title: course.title || 'Untitled Course',
+          rating: course.rating ? parseFloat(course.rating) : 0,
+          reviewCount: toNumber(course.review_num),
+          duration: course.time || 'Unknown',
+          students: toNumber(course.students),
+          url: course.url || '',
+          summary: course.summary || '',
+          difficulty: record.get('difficulty') || 'Unknown',
+          organization: record.get('organization') || 'Unknown',
+          skills: (record.get('skills') || []).filter(Boolean),
+          prerequisites: (record.get('prerequisites') || []).filter(Boolean),
+          prerequisiteCourses: (record.get('prerequisiteCourses') || []).filter(Boolean)
+        };
+      } catch (error) {
+        console.error('Error parsing course record:', error);
+        return null;
+      }
+    }).filter(Boolean);
+
+    console.log(`Applying rule-based reasoning to ${courseCandidates.length} courses...`);
+    
+    // Use search term as fallback goal if no explicit goals provided
+    const effectiveGoals = goalSkills.length > 0 ? goalSkills : [searchTerm];
+    
+    // Apply all expert rules and get scored courses
+    const scoredCourses = ruleEngine.scoreAndRank(
+      courseCandidates,
+      effectiveGoals,
+      maxDurationMonths,
+      parsedUserLevel
+    );
+
+    console.log(`Top 5 courses after rule engine:`);
+    scoredCourses.slice(0, 5).forEach((course, i) => {
+      console.log(`  ${i + 1}. ${course.title} (Score: ${course.score})`);
+    });
+
+    // ============================================================
+    // STAGE 4: LEARNING PATH CONSTRUCTION
+    // ============================================================
+    console.log('\n[STAGE 4: Building Learning Path Visualization]');
+    
+    const MAX_PATH_LENGTH = 10;
+    const topCourses = scoredCourses.slice(0, MAX_PATH_LENGTH);
+    
+    // Helper function to categorize courses by difficulty
+    const categorizeCoursesByDifficulty = (courses) => {
+      const categories = { beginner: [], intermediate: [], advanced: [] };
+      
+      courses.forEach(course => {
+        const diff = (course.difficulty || '').toLowerCase();
+        if (diff.includes('beginner') || diff.includes('introductory')) {
+          categories.beginner.push(course);
+        } else if (diff.includes('intermediate') || diff.includes('mixed')) {
+          categories.intermediate.push(course);
+        } else if (diff.includes('advanced') || !diff.includes('beginner')) {
+          categories.advanced.push(course);
+        }
+      });
+      
+      return categories;
+    };
+    
+    const coursesByDifficulty = categorizeCoursesByDifficulty(topCourses);
+
+    // Build learning path based on user level
+    const buildLearningPath = (level, categories) => {
+      const { beginner, intermediate, advanced } = categories;
+      
+      // Define path composition by user level
+      const pathStrategies = {
+        1: [4, 4, 2],  // Beginner: Focus on fundamentals
+        2: [4, 4, 2],  // Still beginner-focused
+        3: [2, 5, 3],  // Intermediate: Balanced approach
+        4: [0, 5, 5],  // Advanced: Skip basics
+        5: [0, 5, 5]   // Expert: Advanced focus
+      };
+      
+      const strategy = pathStrategies[level] || pathStrategies[3];
+      const [beginnerCount, intermediateCount, advancedCount] = strategy;
+      
+      return [
+        ...beginner.slice(0, beginnerCount),
+        ...intermediate.slice(0, intermediateCount),
+        ...advanced.slice(0, advancedCount)
+      ];
+    };
+    
+    let learningPath = buildLearningPath(parsedUserLevel, coursesByDifficulty);
+    
+    // Fallback: Use top scored courses if difficulty filtering yields nothing
+    if (learningPath.length === 0) {
+      console.log('⚠️  No difficulty-filtered courses, using top scored courses');
+      learningPath = topCourses;
+    }
+
+    // Helper function to build course connections in the path
+    const buildCourseConnections = (course, prevCourse) => {
+      if (!prevCourse) return [];
+      
+      // Check for skill prerequisites
+      const sharedSkills = (course.prerequisites || []).filter(prereq =>
+        (prevCourse.skills || []).some(skill => 
+          skill.includes(prereq) || prereq.includes(skill)
+        )
+      );
+      
+      if (sharedSkills.length > 0) {
+        return [{
+          from: prevCourse.title,
+          type: 'prerequisite',
+          reason: `Requires skills from previous course: ${sharedSkills.slice(0, 2).join(', ')}`
+        }];
+      }
+      
+      return [{
+        from: prevCourse.title,
+        type: 'progression',
+        reason: 'Next step in learning path'
+      }];
+    };
+    
+    // Build final recommendations with enriched metadata
+    const recommendations = learningPath.map((course, index) => {
+      const connections = buildCourseConnections(
+        course, 
+        index > 0 ? learningPath[index - 1] : null
+      );
+      
+      return {
+        step: index + 1,
+        title: course.title,
+        rating: course.rating,
+        reviewCount: course.reviewCount,
+        duration: course.duration,
+        students: course.students,
+        url: course.url,
+        summary: course.summary,
+        difficulty: course.difficulty,
+        organization: course.organization,
+        skills: course.skills.slice(0, 5), // Limit to top 5 for brevity
+        score: course.score,
+        explanation: course.explanation,
+        connections,
+        reason: index === 0 
+          ? '🎯 Starting Point: ' + course.explanation
+          : `📚 Step ${index + 1}: ` + course.explanation
+      };
+    });
+
+    console.log(`✅ Built learning path with ${recommendations.length} courses`);
+    
+    // Return structured response with comprehensive metadata
+    res.json({
+      success: true,
+      recommendations,
+      metadata: {
+        query: {
+          searchTerm,
+          currentSkills: userSkills,
+          learningGoals: effectiveGoals,
+          availableTime: maxDurationMonths ? `${maxDurationMonths} months` : 'Flexible',
+          userLevel: parsedUserLevel
+        },
+        results: {
+          totalCandidates: courseCandidates.length,
+          pathLength: recommendations.length,
+          avgScore: recommendations.length > 0
+            ? Math.round(recommendations.reduce((sum, c) => sum + c.score, 0) / recommendations.length)
+            : 0
+        },
+        pipeline: {
+          stage1: 'Input parsing and validation',
+          stage2: `Retrieved ${result.records.length} courses from Neo4j`,
+          stage3: `Scored ${courseCandidates.length} courses using rule engine`,
+          stage4: `Built ${recommendations.length}-step learning path`
+        }
+      }
+    });
   } catch (error) {
-    console.error("Learning pathway error:", error);
-    res.status(500).json({ error: "Failed to fetch learning pathway" });
+    console.error('❌ Learning pathway error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to build learning pathway',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   } finally {
     await session.close();
   }
@@ -912,51 +799,11 @@ app.get("/api/recommendations/next/:courseTitle", async (req, res) => {
 // ============================================================
 
 // ============================================================
-// USER PROGRESS ROUTES
-// ============================================================
-
-// Mark course as completed (disabled - authentication removed)
-app.post("/api/user/complete-course", async (req, res) => {
-  res
-    .status(501)
-    .json({
-      error: "User authentication is disabled. This feature is not available.",
-    });
-});
-
-// Add course to wishlist (disabled - authentication removed)
-app.post("/api/user/wishlist", async (req, res) => {
-  res
-    .status(501)
-    .json({
-      error: "User authentication is disabled. This feature is not available.",
-    });
-});
-
-// Get user's completed courses (disabled - authentication removed)
-app.get("/api/user/completed", async (req, res) => {
-  res
-    .status(501)
-    .json({
-      error: "User authentication is disabled. This feature is not available.",
-    });
-});
-
-// Get user's wishlist (disabled - authentication removed)
-app.get("/api/user/wishlist", async (req, res) => {
-  res
-    .status(501)
-    .json({
-      error: "User authentication is disabled. This feature is not available.",
-    });
-});
-
-// ============================================================
 // SEARCH AND FILTER ROUTES
 // ============================================================
 
 // Get all organizations
-app.get("/api/organizations", async (req, res) => {
+app.get('/api/organizations', async (req, res) => {
   const session = driver.session();
   try {
     const result = await session.run(
@@ -965,22 +812,22 @@ app.get("/api/organizations", async (req, res) => {
        ORDER BY courseCount DESC`
     );
 
-    const organizations = result.records.map((record) => ({
-      name: record.get("name"),
-      courseCount: record.get("courseCount").toNumber(),
+    const organizations = result.records.map(record => ({
+      name: record.get('name'),
+      courseCount: record.get('courseCount').toNumber()
     }));
 
     res.json({ organizations });
   } catch (error) {
-    console.error("Organizations error:", error);
-    res.status(500).json({ error: "Failed to fetch organizations" });
+    console.error('Organizations error:', error);
+    res.status(500).json({ error: 'Failed to fetch organizations' });
   } finally {
     await session.close();
   }
 });
 
 // Get all skills
-app.get("/api/skills", async (req, res) => {
+app.get('/api/skills', async (req, res) => {
   const session = driver.session();
   try {
     const result = await session.run(
@@ -990,15 +837,15 @@ app.get("/api/skills", async (req, res) => {
        `
     );
 
-    const skills = result.records.map((record) => ({
-      name: record.get("name"),
-      courseCount: record.get("courseCount").toNumber(),
+    const skills = result.records.map(record => ({
+      name: record.get('name'),
+      courseCount: record.get('courseCount').toNumber()
     }));
 
     res.json({ skills });
   } catch (error) {
-    console.error("Skills error:", error);
-    res.status(500).json({ error: "Failed to fetch skills" });
+    console.error('Skills error:', error);
+    res.status(500).json({ error: 'Failed to fetch skills' });
   } finally {
     await session.close();
   }
@@ -1008,35 +855,33 @@ app.get("/api/skills", async (req, res) => {
 // SERVER STARTUP
 // ============================================================
 
-app.get("/", (req, res) => {
+app.get('/', (req, res) => {
   res.json({
-    message: "Course Recommendation API",
-    version: "1.0.0",
+    message: 'Course Recommendation API',
+    version: '2.0.0',
     endpoints: {
-      auth: "/api/auth/*",
-      courses: "/api/courses",
-      recommendations: "/api/recommendations/*",
-      user: "/api/user/*",
-    },
+      courses: '/api/courses',
+      courseDetails: '/api/courses/:title',
+      learningPath: '/api/recommendations/next/:courseTitle',
+      organizations: '/api/organizations',
+      skills: '/api/skills'
+    }
   });
 });
 
 // Graceful shutdown
-process.on("SIGINT", async () => {
-  console.log("Shutting down gracefully...");
+process.on('SIGINT', async () => {
+  console.log('Shutting down gracefully...');
   await driver.close();
   process.exit(0);
 });
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log(
-    `📊 Neo4j connected to: ${process.env.NEO4J_URI || "default URI"}`
-  );
+  console.log(`📊 Neo4j connected to: ${process.env.NEO4J_URI || 'default URI'}`);
   console.log(`\nAPI Endpoints:`);
-  console.log(`  - Auth: http://localhost:${PORT}/api/auth/*`);
   console.log(`  - Courses: http://localhost:${PORT}/api/courses`);
-  console.log(
-    `  - Recommendations: http://localhost:${PORT}/api/recommendations/*`
-  );
+  console.log(`  - Learning Path: http://localhost:${PORT}/api/recommendations/next/:topic`);
+  console.log(`  - Organizations: http://localhost:${PORT}/api/organizations`);
+  console.log(`  - Skills: http://localhost:${PORT}/api/skills`);
 });
